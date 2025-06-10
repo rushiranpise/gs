@@ -62,6 +62,7 @@ CONFIG_KEYBOARD_S2MPG12=m
 # private/google-modules/soc/gs/drivers/iommu/Kconfig
 CONFIG_SAMSUNG_IOMMU=m
 CONFIG_EXYNOS_PCIE_IOMMU=m
+CONFIG_IOVAD_BEST_FIT_ALGO=m
 
 # private/google-modules/soc/gs/drivers/media/platform/Kconfig
 CONFIG_VIDEO_EXYNOS_MFC=m
@@ -102,6 +103,9 @@ CONFIG_PINCTRL_SLG51002=m
 # private/google-modules/soc/gs/drivers/power/Kconfig
 CONFIG_DEBUG_REBOOT=m
 
+# private/google-modules/soc/gs/drivers/pwm/Kconfig
+CONFIG_PWM_EXYNOS=m
+
 # private/google-modules/soc/gs/drivers/regulator/Kconfig
 CONFIG_REGULATOR_S2MPG12=m
 CONFIG_REGULATOR_S2MPG13=m
@@ -139,6 +143,7 @@ CONFIG_SLC_PMON=y
 CONFIG_PIXEL_STAT=m
 CONFIG_EXYNOS_SECURE_LOG=m
 CONFIG_EXYNOS_CONTENT_PATH_PROTECTION=m
+CONFIG_GOOGLE_MODEMCTL=m
 CONFIG_GSA=m
 CONFIG_GSA_PKVM=m
 CONFIG_GSA_GSC=m
@@ -159,6 +164,7 @@ CONFIG_PIXEL_BOOT_METRICS=m
 CONFIG_PIXEL_SUSPEND_DIAG=m
 CONFIG_GS_SJTAG=m
 CONFIG_ETM2DRAM=m
+CONFIG_SMRA=m
 CONFIG_VH_SYSTRACE=m
 CONFIG_PIXEL_EM=m
 CONFIG_PIXEL_METRICS=m
@@ -238,6 +244,9 @@ CONFIG_DRM_PANEL_SAMSUNG_S6E3HC3=m
 CONFIG_DRM_PANEL_SAMSUNG_S6E3HC3_C10=m
 CONFIG_DRM_PANEL_SAMSUNG_S6E3HC4=m
 CONFIG_DRM_PANEL_BOE_NT37290=m
+
+# private/google-modules/fingerprint/goodix/fps_touch_handler/Kconfig
+CONFIG_FPS_TOUCH_HANDLER=m
 
 # private/google-modules/power/mitigation/Kconfig
 CONFIG_GOOGLE_BCL=m
