@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 6.1.141 Kernel Configuration
+# Linux/arm64 6.1.145 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="blu_spark clang version 17.0.6 (https://github.com/llvm/llvm-project 6009708b4367171ccdbf4b5905cb6a803753fe18)"
 CONFIG_GCC_VERSION=0
@@ -1842,6 +1842,7 @@ CONFIG_ARM_SCMI_TRANSPORT_VIRTIO_VERSION1_COMPLIANCE=y
 
 CONFIG_ARM_SCPI_PROTOCOL=y
 # CONFIG_ARM_SCPI_POWER_DOMAIN is not set
+# CONFIG_ARM_SDE_INTERFACE is not set
 # CONFIG_FIRMWARE_MEMMAP is not set
 # CONFIG_FW_CFG_SYSFS is not set
 # CONFIG_SYSFB_SIMPLEFB is not set
@@ -5478,7 +5479,7 @@ CONFIG_DMA_OF=y
 #
 CONFIG_SYNC_FILE=y
 # CONFIG_SW_SYNC is not set
-# CONFIG_UDMABUF is not set
+CONFIG_UDMABUF=y
 # CONFIG_DMABUF_MOVE_NOTIFY is not set
 # CONFIG_DMABUF_DEBUG is not set
 # CONFIG_DMABUF_SELFTESTS is not set
