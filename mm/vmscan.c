@@ -816,6 +816,7 @@ static unsigned long do_shrink_slab(struct shrink_control *shrinkctl,
 
 	freeable = shrinker->count_objects(shrinker, shrinkctl);
 	trace_android_vh_do_shrink_slab(shrinker, &freeable);
+	trace_android_vh_do_shrink_slab_ex(shrinkctl, shrinker, &freeable, priority);
 	if (freeable == 0 || freeable == SHRINK_EMPTY)
 		return freeable;
 
@@ -2709,6 +2710,8 @@ static void shrink_active_list(unsigned long nr_to_scan,
 		}
 
 		trace_android_vh_page_referenced_check_bypass(folio, nr_to_scan, lru, &bypass);
+		trace_android_vh_folio_referenced_check_bypass(folio, sc->priority,
+					     nr_to_scan, lru, &bypass);
 		if (bypass)
 			goto skip_folio_referenced;
 		trace_android_vh_folio_trylock_set(folio);
@@ -6603,6 +6606,7 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 	struct lruvec *target_lruvec;
 	bool reclaimable = false;
 
+	trace_android_vh_shrink_node(pgdat, sc->target_mem_cgroup);
 	if (lru_gen_enabled() && global_reclaim(sc)) {
 		lru_gen_shrink_node(pgdat, sc);
 		return;
