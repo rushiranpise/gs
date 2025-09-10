@@ -228,6 +228,64 @@ static inline u32 cred_sid(const struct cred *cred)
 	return tsec->sid;
 }
 
+static inline u64 cred_tsec_flags(const struct cred *cred)
+{
+	const struct task_security_struct *tsec;
+
+	tsec = selinux_cred(cred);
+	return tsec->flags;
+}
+
+static int get_type_from_sid(u32 sid, u32 *out)
+{
+	return security_sid_to_context_type(&selinux_state, sid, out);
+}
+
+static void audit_log_tsec_flag_denial_inner(const char *prefix, struct common_audit_data *adp)
+{
+	kuid_t uid;
+	pid_t tgid;
+	// Apps are allowed to fork() their processes. If process parent is an isolated process, there's no good way to
+	// determine after child process death which app UID it belonged to, since isolated process UID is separate from
+	// app UID.
+	// Adding tgid of the top-most process with the same uid as current process to audit message allows to attribute
+	// such processes to their apps, since top-most processes are always spawned and managed by the OS (see difference
+	// between ProcessRecord and PhantomProcessRecord in Android system_server code).
+	pid_t top_tgid_with_same_uid;
+	struct task_struct *cur;
+	struct task_struct *parent;
+	struct audit_buffer *ab;
+
+	rcu_read_lock();
+	cur = current;
+	uid = __task_cred(cur)->uid;
+	tgid = task_tgid_nr(cur);
+	top_tgid_with_same_uid = tgid;
+	parent = cur->parent;
+	while (parent != NULL && uid_eq(__task_cred(parent)->uid, uid)) {
+		top_tgid_with_same_uid = task_tgid_nr(parent);
+		parent = parent->parent;
+	}
+	rcu_read_unlock();
+
+	ab = audit_log_start(audit_context(), GFP_ATOMIC | __GFP_NOWARN, AUDIT_SELINUX_TSEC_FLAG_DENIAL);
+
+	if (ab == NULL) {
+		return;
+	}
+
+	audit_log_format(ab, "%s: op denied, uid %u, pid %i, top_pid_with_same_uid %i,", prefix, __kuid_val(uid),
+		tgid, top_tgid_with_same_uid);
+
+	if (adp) {
+		dump_common_audit_data(ab, adp);
+	}
+
+	audit_log_end(ab);
+}
+
+#define audit_log_tsec_flag_denial(f, adp) audit_log_tsec_flag_denial_inner(#f, adp)
+
 /*
  * get the objective security ID of a task
  */
@@ -1610,6 +1668,66 @@ static int cred_has_capability(const struct cred *cred,
 	return rc;
 }
 
+static int selinux_inode_check_tsec_flags(
+	struct selinux_state *s, const struct cred *cred,
+	struct inode_security_struct *isec, u32 perms,
+	struct common_audit_data *adp)
+{
+	int rc;
+	u32 inode_type;
+	u64 flags = cred_tsec_flags(cred);
+	u64 denied_flags = 0;
+	char *flag_str = NULL;
+
+	if (perms & FILE__EXECMOD) {
+		if (flags & TSEC_FLAG_DENY_EXECMOD) {
+			audit_log_tsec_flag_denial(TSEC_FLAG_DENY_EXECMOD, adp);
+			return -EACCES;
+		}
+	}
+
+	if (perms & FILE__EXECUTE) {
+		if (!(flags & TSEC_ALL_DENY_EXECUTE_FLAGS)) {
+			// none of the DENY_EXEC_* flags are set
+			return 0;
+		}
+		rc = get_type_from_sid(isec->sid, &inode_type);
+
+		if (rc) {
+			pr_warn("unknown type for sid %i, inode %lu\n", isec->sid, isec->inode->i_ino);
+			// This function is called only if the regular SELinux check returned "allowed". If SELinux is configured
+			// to deny this inode operation on inodes with unknown contexts, it would already be denied and this code
+			// would not be reached.
+			return 0;
+		}
+
+#define DENY_FLAG(s) denied_flags = s; flag_str = #s
+
+		if (inode_type == s->types.appdomain_tmpfs) {
+			DENY_FLAG(TSEC_FLAG_DENY_EXECUTE_APPDOMAIN_TMPFS);
+		} else if (inode_type == s->types.app_data_file) {
+			DENY_FLAG(TSEC_FLAG_DENY_EXECUTE_APP_DATA_FILE);
+		} else if (inode_type == s->types.ashmem_device) {
+			DENY_FLAG(TSEC_FLAG_DENY_EXECUTE_ASHMEM_DEVICE);
+		} else if (inode_type == s->types.ashmem_libcutils_device) {
+			DENY_FLAG(TSEC_FLAG_DENY_EXECUTE_ASHMEM_LIBCUTILS_DEVICE);
+		} else if (inode_type == s->types.privapp_data_file) {
+			DENY_FLAG(TSEC_FLAG_DENY_EXECUTE_PRIVAPP_DATA_FILE);
+		} else {
+			return 0;
+		}
+
+#undef DENY_FLAG
+
+		if (flags & denied_flags) {
+			audit_log_tsec_flag_denial_inner(flag_str, adp);
+			return -EACCES;
+		}
+	}
+
+	return 0;
+}
+
 /* Check whether a task has a particular permission to an inode.
    The 'adp' parameter is optional and allows other audit
    data to be passed (e.g. the dentry). */
@@ -1620,6 +1738,7 @@ static int inode_has_perm(const struct cred *cred,
 {
 	struct inode_security_struct *isec;
 	u32 sid;
+	int rc;
 
 	validate_creds(cred);
 
@@ -1629,8 +1748,13 @@ static int inode_has_perm(const struct cred *cred,
 	sid = cred_sid(cred);
 	isec = selinux_inode(inode);
 
-	return avc_has_perm(&selinux_state,
+	rc = avc_has_perm(&selinux_state,
 			    sid, isec->sid, isec->sclass, perms, adp);
+
+	if (!rc) {
+		rc = selinux_inode_check_tsec_flags(&selinux_state, cred, isec, perms, adp);
+	}
+	return rc;
 }
 
 /* Same as inode_has_perm, but pass explicit audit data containing
@@ -2066,25 +2190,62 @@ static int selinux_binder_transfer_file(const struct cred *from,
 			    &ad);
 }
 
+static bool is_crash_dump_sid(u32 sid)
+{
+	u32 type;
+	if (get_type_from_sid(sid, &type)) {
+		return false;
+	}
+	return type == selinux_state.types.crash_dump;
+}
+
 static int selinux_ptrace_access_check(struct task_struct *child,
 				       unsigned int mode)
 {
-	u32 sid = current_sid();
+    const struct cred *cred = current_cred();
+	u32 sid = cred_sid(cred);
 	u32 csid = task_sid_obj(child);
+    int rc;
 
 	if (mode & PTRACE_MODE_READ)
 		return avc_has_perm(&selinux_state,
 				    sid, csid, SECCLASS_FILE, FILE__READ, NULL);
 
-	return avc_has_perm(&selinux_state,
+	rc = avc_has_perm(&selinux_state,
 			    sid, csid, SECCLASS_PROCESS, PROCESS__PTRACE, NULL);
+
+	if (!rc) {
+		if (cred_tsec_flags(cred) & TSEC_FLAG_DENY_PROCESS_PTRACE) {
+			// Exempt crash_dump binary from this restriction:
+			// crash_dump process is spawned as a child of crashed process and needs ptrace acccess to collect parent's
+			// stack trace.
+			// sepolicy of crash_dump domain allows ptrace access, but tsec_flags are inherited across fork()
+			if (!is_crash_dump_sid(sid)) {
+				audit_log_tsec_flag_denial(TSEC_FLAG_DENY_PROCESS_PTRACE, NULL);
+				return -EPERM;
+			}
+		}
+	}
+	return rc;
 }
 
 static int selinux_ptrace_traceme(struct task_struct *parent)
 {
-	return avc_has_perm(&selinux_state,
-			    task_sid_obj(parent), task_sid_obj(current),
-			    SECCLASS_PROCESS, PROCESS__PTRACE, NULL);
+	const struct cred *cred = current_cred();
+	u32 sid = cred_sid(cred);
+
+	int rc = avc_has_perm(&selinux_state,
+			    task_sid_obj(parent), sid, SECCLASS_PROCESS,
+			    PROCESS__PTRACE, NULL);
+
+	if (!rc) {
+		if (cred_tsec_flags(cred) & TSEC_FLAG_DENY_PROCESS_PTRACE) {
+			audit_log_tsec_flag_denial_inner("TSEC_FLAG_DENY_PROCESS_PTRACE (ptrace_traceme)", NULL);
+			return -EPERM;
+		}
+	}
+
+	return rc;
 }
 
 static int selinux_capget(struct task_struct *target, kernel_cap_t *effective,
@@ -2284,6 +2445,7 @@ static int selinux_bprm_creds_for_exec(struct linux_binprm *bprm)
 	struct common_audit_data ad;
 	struct inode *inode = file_inode(bprm->file);
 	int rc;
+	u32 inode_context_type;
 
 	/* SELinux context only depends on initial program or script and not
 	 * the script interpreter */
@@ -2336,6 +2498,17 @@ static int selinux_bprm_creds_for_exec(struct linux_binprm *bprm)
 				  SECCLASS_FILE, FILE__EXECUTE_NO_TRANS, &ad);
 		if (rc)
 			return rc;
+
+		if (old_tsec->flags & TSEC_FLAG_DENY_EXECUTE_NO_TRANS_APP_DATA_FILE) {
+			rc = get_type_from_sid(isec->sid, &inode_context_type);
+			if (rc)
+				return rc;
+
+			if (inode_context_type == selinux_state.types.app_data_file) {
+				audit_log_tsec_flag_denial(TSEC_FLAG_DENY_EXECUTE_NO_TRANS_APP_DATA_FILE, &ad);
+				return -EACCES;
+			}
+		}
 	} else {
 		/* Check permissions for the transition. */
 		rc = avc_has_perm(&selinux_state,
@@ -3115,6 +3288,11 @@ static int selinux_inode_permission(struct inode *inode, int mask)
 	rc = avc_has_perm_noaudit(&selinux_state,
 				  sid, isec->sid, isec->sclass, perms, 0,
 				  &avd);
+
+	if (!rc) {
+		rc = selinux_inode_check_tsec_flags(&selinux_state, cred, isec, perms, NULL);
+	}
+
 	audited = avc_audit_required(perms, &avd, rc,
 				     from_access ? FILE__AUDIT_ACCESS : 0,
 				     &denied);
@@ -3764,6 +3942,14 @@ static int file_map_prot_check(struct file *file, unsigned long prot, int shared
 		rc = avc_has_perm(&selinux_state,
 				  sid, sid, SECCLASS_PROCESS,
 				  PROCESS__EXECMEM, NULL);
+
+		if (!rc) {
+			if (cred_tsec_flags(cred) & TSEC_FLAG_DENY_EXECMEM) {
+				audit_log_tsec_flag_denial(TSEC_FLAG_DENY_EXECMEM, NULL);
+				rc = -EACCES;
+			}
+		}
+
 		if (rc)
 			goto error;
 	}
@@ -6395,6 +6581,7 @@ static int selinux_getprocattr(struct task_struct *p,
 {
 	const struct task_security_struct *__tsec;
 	u32 sid;
+	u64 flags;
 	int error;
 	unsigned len;
 
@@ -6421,11 +6608,25 @@ static int selinux_getprocattr(struct task_struct *p,
 		sid = __tsec->keycreate_sid;
 	else if (!strcmp(name, "sockcreate"))
 		sid = __tsec->sockcreate_sid;
+	else if (!strcmp(name, "selinux_flags"))
+		flags = __tsec->flags;
 	else {
 		error = -EINVAL;
 		goto bad;
 	}
 	rcu_read_unlock();
+
+	if (!strcmp(name, "selinux_flags")) {
+		size_t len = 16 + 1;
+		// freed by the caller
+		char *buf = kzalloc(len, GFP_KERNEL);
+		if (!buf) {
+			return -ENOMEM;
+		}
+		len = snprintf(buf, len, "%llx", flags);
+		*value = buf;
+		return (int) len;
+	}
 
 	if (!sid)
 		return 0;
@@ -6444,9 +6645,10 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 {
 	struct task_security_struct *tsec;
 	struct cred *new;
-	u32 mysid = current_sid(), sid = 0, ptsid;
+	u32 mysid = current_sid(), sid = 0, ptsid, context_type = 0;
 	int error;
 	char *str = value;
+	u64 flags;
 
 	/*
 	 * Basic control over ability to set these attributes at all.
@@ -6467,7 +6669,7 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 		error = avc_has_perm(&selinux_state,
 				     mysid, mysid, SECCLASS_PROCESS,
 				     PROCESS__SETSOCKCREATE, NULL);
-	else if (!strcmp(name, "current"))
+	else if (!strcmp(name, "current") || !strcmp(name, "selinux_flags"))
 		error = avc_has_perm(&selinux_state,
 				     mysid, mysid, SECCLASS_PROCESS,
 				     PROCESS__SETCURRENT, NULL);
@@ -6477,7 +6679,7 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 		return error;
 
 	/* Obtain a SID for the context, if one was specified. */
-	if (size && str[0] && str[0] != '\n') {
+	if (size && str[0] && str[0] != '\n' && strcmp(name, "selinux_flags")) {
 		if (str[size-1] == '\n') {
 			str[size-1] = 0;
 			size--;
@@ -6571,6 +6773,37 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 		}
 
 		tsec->sid = sid;
+	} else if (!strcmp(name, "selinux_flags")) {
+		error = get_type_from_sid(mysid, &context_type);
+		if (error) {
+			goto abort_change;
+		}
+
+		if (context_type != selinux_state.types.zygote &&
+			context_type != selinux_state.types.webview_zygote
+		) {
+			pr_err("selinux_flags: attempt to set from an unknown context, pid %i\n", current->pid);
+			error = -EPERM;
+			goto abort_change;
+		}
+
+		if (size >= 2 && str[size - 1] == 0) {
+			if (kstrtou64(str, 16, &flags)) {
+				error = -EINVAL;
+				goto abort_change;
+			}
+		} else {
+			error = -EINVAL;
+			goto abort_change;
+		}
+
+		if ((flags & TSEC_ALL_FLAGS) != flags) {
+			pr_warn("selinux_flags: unknown flags %llu\n", flags & ~TSEC_ALL_FLAGS);
+			error = -EINVAL;
+			goto abort_change;
+		}
+
+		tsec->flags = flags;
 	} else {
 		error = -EINVAL;
 		goto abort_change;

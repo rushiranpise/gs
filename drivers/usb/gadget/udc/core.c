@@ -672,6 +672,8 @@ out:
 }
 EXPORT_SYMBOL_GPL(usb_gadget_vbus_disconnect);
 
+extern int deny_new_usb;
+
 static int usb_gadget_connect_locked(struct usb_gadget *gadget)
 	__must_hold(&gadget->udc->connect_lock)
 {
@@ -679,6 +681,12 @@ static int usb_gadget_connect_locked(struct usb_gadget *gadget)
 
 	if (!gadget->ops->pullup) {
 		ret = -EOPNOTSUPP;
+		goto out;
+	}
+
+	if (deny_new_usb) {
+		dev_err(&gadget->dev, "blocked USB gadget connection\n");
+		ret = -EPERM;
 		goto out;
 	}
 
@@ -1511,8 +1519,8 @@ void usb_del_gadget(struct usb_gadget *gadget)
 
 	kobject_uevent(&udc->dev.kobj, KOBJ_REMOVE);
 	sysfs_remove_link(&udc->dev.kobj, "gadget");
-	flush_work(&gadget->work);
 	device_del(&gadget->dev);
+	flush_work(&gadget->work);
 	ida_free(&gadget_id_numbers, gadget->id_number);
 	cancel_work_sync(&udc->vbus_work);
 	device_unregister(&udc->dev);

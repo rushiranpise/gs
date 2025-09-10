@@ -354,9 +354,9 @@ unsigned long __weak arch_randomize_brk(struct mm_struct *mm)
 {
 	/* Is the current task 32bit ? */
 	if (!IS_ENABLED(CONFIG_64BIT) || is_compat_task())
-		return randomize_page(mm->brk, SZ_32M);
+		return mm->brk + get_random_long() % SZ_32M + PAGE_SIZE;
 
-	return randomize_page(mm->brk, SZ_1G);
+	return mm->brk + get_random_long() % SZ_1G + PAGE_SIZE;
 }
 
 unsigned long arch_mmap_rnd(void)
@@ -366,6 +366,10 @@ unsigned long arch_mmap_rnd(void)
 #ifdef CONFIG_HAVE_ARCH_MMAP_RND_COMPAT_BITS
 	if (is_compat_task())
 		rnd = get_random_long() & ((1UL << mmap_rnd_compat_bits) - 1);
+#ifdef CONFIG_ARM64
+	else if (test_thread_flag(TIF_39BIT))
+		rnd = get_random_long() & ((1UL << MMAP_RND_BITS_39_BIT) - 1);
+#endif
 	else
 #endif /* CONFIG_HAVE_ARCH_MMAP_RND_COMPAT_BITS */
 		rnd = get_random_long() & ((1UL << mmap_rnd_bits) - 1);
@@ -847,6 +851,7 @@ int folio_mapcount(struct folio *folio)
 		ret -= nr;
 	return ret;
 }
+EXPORT_SYMBOL_GPL(folio_mapcount);
 
 /**
  * folio_copy - Copy the contents of one folio to another.

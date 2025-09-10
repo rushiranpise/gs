@@ -89,6 +89,17 @@ extern int selinux_enabled_boot;
 struct selinux_avc;
 struct selinux_policy;
 
+struct context_types {
+	u32 app_data_file;
+	u32 appdomain_tmpfs;
+	u32 ashmem_device;
+	u32 ashmem_libcutils_device;
+	u32 crash_dump;
+	u32 privapp_data_file;
+	u32 webview_zygote;
+	u32 zygote;
+};
+
 struct selinux_state {
 #ifdef CONFIG_SECURITY_SELINUX_DISABLE
 	bool disabled;
@@ -101,6 +112,8 @@ struct selinux_state {
 	bool policycap[__POLICYDB_CAP_MAX];
 	bool android_netlink_route;
 	bool android_netlink_getneigh;
+
+	struct context_types types;
 
 	struct page *status_page;
 	struct mutex status_lock;
@@ -333,6 +346,8 @@ int security_change_sid(struct selinux_state *state, u32 ssid, u32 tsid,
 
 int security_sid_to_context(struct selinux_state *state, u32 sid,
 			    char **scontext, u32 *scontext_len);
+
+int security_sid_to_context_type(struct selinux_state *state, u32 sid, u32 *out);
 
 int security_sid_to_context_force(struct selinux_state *state,
 				  u32 sid, char **scontext, u32 *scontext_len);

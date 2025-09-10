@@ -120,6 +120,16 @@
 #include <net/compat.h>
 
 #include <trace/events/sock.h>
+#include <trace/hooks/net.h>
+
+#define AID_INET KGIDT_INIT(3003)
+
+static inline int current_has_network(void)
+{
+	return in_egroup_p(AID_INET) || capable(CAP_NET_RAW);
+}
+
+int sysctl_reserved_port_bind __read_mostly = 1;
 
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
@@ -256,6 +266,9 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 	if (protocol < 0 || protocol >= IPPROTO_MAX)
 		return -EINVAL;
 
+	if (!current_has_network())
+		return -EACCES;
+
 	sock->state = SS_UNCONNECTED;
 
 	/* Look for the requested type/protocol pair. */
@@ -386,6 +399,9 @@ lookup_protocol:
 		if (err)
 			goto out_sk_release;
 	}
+
+	trace_android_rvh_inet_sock_create(sk);
+
 out:
 	return err;
 out_rcu_unlock:
@@ -412,6 +428,8 @@ int inet_release(struct socket *sock)
 
 		if (!sk->sk_kern_sock)
 			BPF_CGROUP_RUN_PROG_INET_SOCK_RELEASE(sk);
+
+		trace_android_rvh_inet_sock_release(sk);
 
 		/* Applications forget to leave groups before exiting */
 		ip_mc_drop_socket(sk);
