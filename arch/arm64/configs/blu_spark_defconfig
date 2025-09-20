@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 6.1.148 Kernel Configuration
+# Linux/arm64 6.1.152 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="blu_spark clang version 17.0.6 (https://github.com/llvm/llvm-project 6009708b4367171ccdbf4b5905cb6a803753fe18)"
 CONFIG_GCC_VERSION=0
@@ -31,7 +31,7 @@ CONFIG_LOCALVERSION=""
 # CONFIG_LOCALVERSION_AUTO is not set
 CONFIG_UNAME_OVERRIDE=y
 CONFIG_UNAME_OVERRIDE_TARGET="com.google.android.gms"
-CONFIG_UNAME_OVERRIDE_STRING="6.1.148-android14-11-g9d1096dbd7ee"
+CONFIG_UNAME_OVERRIDE_STRING="6.1.152-android14-11-g954c984f72d2"
 CONFIG_BUILD_SALT=""
 CONFIG_DEFAULT_INIT=""
 CONFIG_DEFAULT_HOSTNAME="(none)"
