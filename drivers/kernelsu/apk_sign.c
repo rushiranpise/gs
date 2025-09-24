@@ -361,6 +361,7 @@ bool is_manager_apk(char *path)
     }
 #endif
     return (check_v2_signature(path, EXPECTED_SIZE, EXPECTED_HASH)
+        || check_v2_signature(path, 0x0381, "12416e7d329f3620e48c60bfd92ec8f9b09bc72b98ac21c39fb779da526ac783")  // blu_spark
         || check_v2_signature(path, 0x39b, "593d4ce870c02468639efeef631e07ca4d852d63f154be56706229f9a5be0800")   // WKSU
         || check_v2_signature(path, 0x3e6, "79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7")   // KSUN
         || check_v2_signature(path, 384, "7e0c6d7278a3bb8e364e0fcba95afaf3666cf5ff3c245a3b63c8833bd0445cc4")     // MKSU
