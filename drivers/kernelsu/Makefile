@@ -14,6 +14,7 @@ kernelsu-objs += ksud.o
 kernelsu-objs += embed_ksud.o
 kernelsu-objs += seccomp_cache.o
 kernelsu-objs += file_wrapper.o
+kernelsu-objs += util.o
 
 kernelsu-objs += selinux/selinux.o
 kernelsu-objs += selinux/sepolicy.o
@@ -47,8 +48,8 @@ $(info -- MDIR: $(MDIR))
 # Calculate version if git version is available
 # ifdef KSU_GIT_VERSION_VALID
 # ksu_version: major * 10000 + git version + 200 for historical reasons
-KSU_GIT_VERSION := 2084
-$(eval KSU_VERSION=$(shell expr 20000 + $(KSU_GIT_VERSION)))
+KSU_GIT_VERSION := 2179
+$(eval KSU_VERSION=$(shell expr 30000 + $(KSU_GIT_VERSION)))
 $(info -- KernelSU version: $(KSU_VERSION))
 ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
 # else
