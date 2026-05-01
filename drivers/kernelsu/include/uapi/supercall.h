@@ -10,6 +10,14 @@
 static const __u32 KSU_INSTALL_MAGIC1 = 0xDEADBEEF;
 static const __u32 KSU_INSTALL_MAGIC2 = 0xCAFEBABE;
 
+// Toolkit extensions
+static const __u32 CHANGE_MANAGER_UID = 10006;
+static const __u8 KSU_UMOUNT_GETSIZE = 107;
+static const __u8 KSU_UMOUNT_GETLIST = 108;
+static const __u32 GET_SULOG_DUMP_V2 = 10010;
+static const __u32 CHANGE_KSUVER = 10011;
+static const __u32 CHANGE_SPOOF_UNAME = 10012;
+
 struct ksu_become_daemon_cmd {
     __u8 token[65]; /* Input: daemon token (null-terminated) */
 };
@@ -115,6 +123,14 @@ struct ksu_manage_mark_cmd {
     __u32 result; /* Output: for get operation - mark status or reg_count */
 };
 
+struct ksu_get_hook_mode_cmd {
+    char mode[16];
+};
+
+struct ksu_get_version_tag_cmd {
+    char tag[32];
+};
+
 static const __u32 KSU_MARK_GET = 1;
 static const __u32 KSU_MARK_MARK = 2;
 static const __u32 KSU_MARK_UNMARK = 3;
@@ -128,10 +144,6 @@ struct ksu_add_try_umount_cmd {
     __aligned_u64 arg; /* char ptr, this is the mountpoint */
     __u32 flags; /* this is the flag we use for it */
     __u8 mode; /* denotes what to do with it 0:wipe_list 1:add_to_list 2:delete_entry */
-};
-
-struct ksu_get_sulog_fd_cmd {
-    __u32 flags; /* Input: reserved for future use, must be 0 */
 };
 
 static const __u8 KSU_UMOUNT_WIPE = 0; /* ignore everything and wipe list */
@@ -162,6 +174,7 @@ static const __u32 KSU_IOCTL_MANAGE_MARK = _IOC(_IOC_READ | _IOC_WRITE, 'K', 16,
 static const __u32 KSU_IOCTL_NUKE_EXT4_SYSFS = _IOC(_IOC_WRITE, 'K', 17, 0);
 static const __u32 KSU_IOCTL_ADD_TRY_UMOUNT = _IOC(_IOC_WRITE, 'K', 18, 0);
 static const __u32 KSU_IOCTL_SET_INIT_PGRP = _IO('K', 19);
-static const __u32 KSU_IOCTL_GET_SULOG_FD = _IOW('K', 20, struct ksu_get_sulog_fd_cmd);
+static const __u32 KSU_IOCTL_GET_HOOK_MODE = _IOC(_IOC_READ, 'K', 98, 0);
+static const __u32 KSU_IOCTL_GET_VERSION_TAG = _IOC(_IOC_READ, 'K', 99, 0);
 
 #endif
