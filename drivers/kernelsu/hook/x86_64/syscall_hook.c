@@ -35,10 +35,11 @@ static int patch_syscall_table(int nr, sys_call_ptr_t fn)
     if (nr < 0 || nr >= __NR_syscalls)
         return -EINVAL;
 
-    pr_info("patch syscall %d, 0x%lx -> 0x%lx\n", nr, (unsigned long)READ_ONCE(ksu_syscall_table[nr]),
-            (unsigned long)fn);
+    pr_info("patch syscall %d, 0x%lx -> 0x%lx\n", nr,
+            (unsigned long)READ_ONCE(ksu_syscall_table[nr]), (unsigned long)fn);
 
-    if (ksu_patch_text(&ksu_syscall_table[nr], &fn, sizeof(fn), KSU_PATCH_TEXT_FLUSH_DCACHE)) {
+    if (ksu_patch_text(&ksu_syscall_table[nr], &fn, sizeof(fn),
+                       KSU_PATCH_TEXT_FLUSH_DCACHE)) {
         pr_err("patch syscall %d failed\n", nr);
         return -EIO;
     }
@@ -78,7 +79,9 @@ void ksu_syscall_table_hook(int nr, sys_call_ptr_t fn, sys_call_ptr_t *old)
             hooked_entries[hooked_count].orig = orig;
             hooked_count++;
         } else {
-            pr_warn("hooked_entries full, cannot track syscall %d for restoration\n", nr);
+            pr_warn(
+                "hooked_entries full, cannot track syscall %d for restoration\n",
+                nr);
         }
     }
 
@@ -122,7 +125,7 @@ static int ksu_find_ni_syscall_slots(int *out_slots, int max_slots)
     if (!ksu_syscall_table || max_slots <= 0)
         return 0;
 
-    ni_syscall = (unsigned long)ksu_resolve_symbol_for_functable_hook("__x64_sys_ni_syscall");
+    ni_syscall = (unsigned long)ksu_lookup_symbol("__x64_sys_ni_syscall");
 
     pr_info("sys_ni_syscall: 0x%lx\n", ni_syscall);
 
@@ -204,7 +207,7 @@ void __init ksu_syscall_hook_init(void)
 
     memset(syscall_hooks, 0, sizeof(syscall_hooks));
 
-    ksu_syscall_table = (sys_call_ptr_t *)ksu_resolve_symbol_for_functable_hook("sys_call_table");
+    ksu_syscall_table = (sys_call_ptr_t *)ksu_lookup_symbol("sys_call_table");
     pr_info("sys_call_table=0x%lx", (unsigned long)ksu_syscall_table);
 
     if (!ksu_syscall_table)
@@ -217,7 +220,8 @@ void __init ksu_syscall_hook_init(void)
     }
 
     ksu_dispatcher_nr = ni_slot;
-    ksu_syscall_table_hook(ksu_dispatcher_nr, (sys_call_ptr_t)ksu_syscall_dispatcher, NULL);
+    ksu_syscall_table_hook(ksu_dispatcher_nr,
+                           (sys_call_ptr_t)ksu_syscall_dispatcher, NULL);
     pr_info("dispatcher installed at slot %d\n", ksu_dispatcher_nr);
 }
 
@@ -236,7 +240,8 @@ void __exit ksu_syscall_hook_exit(void)
         sys_call_ptr_t orig = hooked_entries[i].orig;
 
         pr_info("restore syscall %d to 0x%lx\n", nr, (unsigned long)orig);
-        if (ksu_patch_text(&ksu_syscall_table[nr], &orig, sizeof(orig), KSU_PATCH_TEXT_FLUSH_DCACHE)) {
+        if (ksu_patch_text(&ksu_syscall_table[nr], &orig, sizeof(orig),
+                           KSU_PATCH_TEXT_FLUSH_DCACHE)) {
             pr_err("restore syscall %d failed\n", nr);
         }
     }
