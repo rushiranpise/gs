@@ -327,14 +327,6 @@ bool ksu_uid_should_umount(uid_t uid)
 #ifndef CONFIG_KSU_DISABLE_POLICY
     struct app_profile profile = { .current_uid = uid };
 #endif
-    if (unlikely(is_uid_manager(uid))) {
-        // we should not umount on manager!
-        return false;
-    }
-    if (unlikely(uid == WEBVIEW_ZYGOTE_UID)) {
-        // we should not umount for webview zygote
-        return false;
-    }
 #ifdef CONFIG_KSU_DISABLE_POLICY
     return !__ksu_is_allow_uid(uid);
 #else
