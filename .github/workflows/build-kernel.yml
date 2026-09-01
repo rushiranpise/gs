@@ -37,17 +37,17 @@ jobs:
 
       - name: Configure (blu_spark defconfig)
         run: |
-          make ARCH=arm64 LLVM=1 blu_spark_defconfig
-          grep -E "CONFIG_KSU=|CONFIG_KSU_SUSFS=|CONFIG_KSU_SUSFS_SUS_PATH=" .config
+          make O=out ARCH=arm64 LLVM=1 blu_spark_defconfig
+          grep -E "CONFIG_KSU=|CONFIG_KSU_SUSFS=|CONFIG_KSU_SUSFS_SUS_PATH=" out/.config
 
       - name: Build kernel image
         run: |
-          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image
-          ls -lh arch/arm64/boot/Image
+          make O=out ARCH=arm64 LLVM=1 -j"$(nproc)" Image
+          ls -lh out/arch/arm64/boot/Image
 
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
           name: Image-${{ matrix.branch }}
-          path: arch/arm64/boot/Image
+          path: out/arch/arm64/boot/Image
           if-no-files-found: error
