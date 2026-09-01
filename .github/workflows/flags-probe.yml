@@ -1,0 +1,37 @@
+name: flags-probe
+
+on:
+  push:
+    branches:
+      - blu_spark-17-next-susfs
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: probe (${{ matrix.branch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - blu_spark-17-next-susfs
+          - blu_spark-16-next-susfs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 1
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc bison flex libelf-dev libssl-dev clang lld llvm python3
+      - name: Configure
+        run: make O=out ARCH=arm64 LLVM=1 blu_spark_defconfig
+      - name: TSK_STACK_CANARY in asm-offsets
+        run: |
+          make O=out ARCH=arm64 LLVM=1 prepare >/dev/null 2>&1
+          grep TSK_STACK_CANARY out/include/generated/asm-offsets.h || echo "TSK_STACK_CANARY MISSING"
+      - name: Compile one object with V=1
+        run: |
+          make O=out ARCH=arm64 LLVM=1 V=1 fs/open.o 2>&1 | grep -oE -- "-(mstack-protector[^ ]*|fstack-protector[a-z-]*|mllvm[^ ]*)" | sort -u
+          echo "--- full CC line (stack bits) ---"
+          make O=out ARCH=arm64 LLVM=1 V=1 2>/dev/null fs/open.o 2>&1 | grep -E "stack-protector|CC.*afs/open" | head -3
