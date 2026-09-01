@@ -6,6 +6,15 @@ on:
       - blu_spark-17-next-susfs
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+env:
+  VARIANT: a17-next-susfs
+  RELEASE_TAG: r269-a17-next-susfs
+  AK3_SUPPORTED_VERSION: "17"
+  CHANGELOG_TMPL: packaging/changelog-a17.txt
+
 jobs:
   build:
     name: build (blu_spark-17-next-susfs)
@@ -19,7 +28,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            bc bison cpio flex kmod libelf-dev libssl-dev clang lld llvm python3
+            bc bison cpio flex kmod libelf-dev libssl-dev lz4 zip unzip clang lld llvm python3
           clang --version | head -1
       - name: Configure
         run: |
@@ -29,9 +38,48 @@ jobs:
         run: |
           make O=out ARCH=arm64 LLVM=1 -j"$(nproc)" Image
           ls -lh out/arch/arm64/boot/Image
-      - name: Upload kernel image
+      - name: Package boot.img and AnyKernel3 zip
+        run: |
+          set -euo pipefail
+          cd out/arch/arm64/boot
+          # legacy LZ4 compressed kernel (blu_spark/GKI convention)
+          lz4 -l -9 -f - < Image > Image.lz4 2>/dev/null || lz4 -9 -l -f - < Image > Image.lz4
+          python3 -c "d=open('Image.lz4','rb').read(4); assert d==b'\x02\x21\x4c\x18', 'unexpected lz4 magic: '+repr(d)"
+          # boot.img: header v4, empty ramdisk, AVB hash footer, 64 MiB boot partition
+          python3 "$GITHUB_WORKSPACE/packaging/tools/mkbootimg.py" --kernel Image.lz4 --ramdisk /dev/null \
+            --header_version 4 --pagesize 4096 --output boot.img
+          python3 "$GITHUB_WORKSPACE/packaging/tools/avbtool.py" add_hash_footer \
+            --image boot.img --partition_size 67108864 --partition_name boot
+          # AnyKernel3 flashable zip from committed template (engstk blu_spark setup)
+          rm -rf /tmp/ak3 && cp -r "$GITHUB_WORKSPACE/packaging/anykernel3" /tmp/ak3
+          sed -i "s/^supported.versions=.*/supported.versions=$AK3_SUPPORTED_VERSION/" /tmp/ak3/anykernel.sh
+          cp Image.lz4 /tmp/ak3/Image.lz4
+          (cd /tmp/ak3 && zip -q -r9 "$GITHUB_WORKSPACE/out/anykernel.zip" .)
+          ls -lh boot.img "$GITHUB_WORKSPACE/out/anykernel.zip"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          SHA="$(git rev-parse --short=7 HEAD)"
+          IMG="blu_spark_r269-gs-${VARIANT}_${SHA}.img"
+          ZIP="blu_spark_r269-gs-${VARIANT}_${SHA}.zip"
+          mv out/arch/arm64/boot/boot.img "$IMG"
+          mv out/anykernel.zip "$ZIP"
+          sha1sum "$IMG" "$ZIP" > "blu_spark_r269-${VARIANT}.sha1sum"
+          sed "s/@SHA@/$SHA/; s|@DATE@|$(date +%F)|" "$CHANGELOG_TMPL" > changelog.txt
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
+          gh release create "$RELEASE_TAG" "$IMG" "$ZIP" "blu_spark_r269-${VARIANT}.sha1sum" changelog.txt \
+            --target "$SHA" \
+            --title "blu_spark r269 (${VARIANT})" \
+            --notes-file changelog.txt
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Image-A17
-          path: out/arch/arm64/boot/Image
+          name: Image-${{ env.VARIANT }}
+          path: |
+            out/arch/arm64/boot/Image
+            blu_spark_r269-gs-${{ env.VARIANT }}_*.img
+            blu_spark_r269-gs-${{ env.VARIANT }}_*.zip
           if-no-files-found: error

@@ -1,0 +1,8 @@
+- blu_spark r269 - a17 next-susfs (@SHA@, built @DATE@)
+- Add back KernelSU-Next + SUSFS support (upstream dropped it after r260)
+- Based on blu_spark-17 (r268, android14-6.1)
+- SUSFS v2.3.0 fs-side (simonpunk, gki-android14-6.1) on blu_spark hooks
+- KSU-Next 33266 (pershoot dev-susfs driver) with SUSFS integrated
+- Root is builtin via KernelSU-Next manager
+- Flash the AnyKernel3 zip (recommended)
+- Or: fastboot flash boot <img> - don't use boot.img on Pixel 6/7 series, it will upgrade stock SPL
