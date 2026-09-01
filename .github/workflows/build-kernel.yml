@@ -1,0 +1,53 @@
+name: kernel-build
+
+on:
+  push:
+    branches:
+      - blu_spark-16-next-susfs
+      - blu_spark-17-next-susfs
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build (${{ matrix.branch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - blu_spark-16-next-susfs
+          - blu_spark-17-next-susfs
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 1
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison cpio flex kmod \
+            libelf-dev libssl-dev \
+            clang lld llvm \
+            python3
+          clang --version | head -1
+          ld.lld --version | head -1
+
+      - name: Configure (blu_spark defconfig)
+        run: |
+          make ARCH=arm64 LLVM=1 blu_spark_defconfig
+          grep -E "CONFIG_KSU=|CONFIG_KSU_SUSFS=|CONFIG_KSU_SUSFS_SUS_PATH=" .config
+
+      - name: Build kernel image
+        run: |
+          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image
+          ls -lh arch/arm64/boot/Image
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-${{ matrix.branch }}
+          path: arch/arm64/boot/Image
+          if-no-files-found: error
