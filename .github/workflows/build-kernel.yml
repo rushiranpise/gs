@@ -8,19 +8,12 @@ on:
 
 jobs:
   build:
-    name: build (${{ matrix.branch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        branch:
-          - blu_spark-16-next-susfs
-          - blu_spark-16
+    name: build (blu_spark-16-next-susfs)
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.branch }}
+          ref: blu_spark-16-next-susfs
           fetch-depth: 1
       - name: Install toolchain
         run: |
@@ -28,21 +21,20 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison cpio flex kmod libelf-dev libssl-dev clang lld llvm python3
           clang --version | head -1
-      - name: Configure (blu_spark defconfig, LTO disabled for CI)
+      - name: Configure
         run: |
-          make O=out ARCH=arm64 LLVM=1 blu_spark_defconfig
-          # A16-line kernel fails at the full-LTO link with the sysreg
-          # stack guard on non-AOSP clang; disable LTO to isolate the port.
-          ./scripts/config --file out/.config -d LTO_CLANG_FULL -d LTO_CLANG_THIN -e LTO_NONE
-          make O=out ARCH=arm64 LLVM=1 olddefconfig
-          grep -E "CONFIG_KSU=|CONFIG_KSU_SUSFS=|CONFIG_LTO=" out/.config
+          # A16's Makefile defaults CROSS_COMPILE to an aosp aarch64-linux-android
+          # prefix, so clang targets aarch64-linux-android and drops the sysreg
+          # per-task stack guard -> undefined __stack_chk_guard at link.
+          make O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- blu_spark_defconfig
+          grep -E "CONFIG_KSU=|CONFIG_KSU_SUSFS=" out/.config
       - name: Build kernel image
         run: |
-          make O=out ARCH=arm64 LLVM=1 -j"$(nproc)" Image
+          make O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" Image
           ls -lh out/arch/arm64/boot/Image
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
-          name: Image-${{ matrix.branch }}
+          name: Image-A16
           path: out/arch/arm64/boot/Image
-          if-no-files-found: ignore
+          if-no-files-found: error
