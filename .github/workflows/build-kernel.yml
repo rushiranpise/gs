@@ -23,40 +23,30 @@ jobs:
           ref: ${{ matrix.branch }}
           fetch-depth: 1
 
-      - name: Install toolchain
+      - name: Install toolchain (clang-17)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bc bison cpio flex kmod \
             libelf-dev libssl-dev \
-            clang lld llvm \
+            clang-17 lld-17 llvm-17 \
             python3
-          clang --version | head -1
-          ld.lld --version | head -1
+          echo "/usr/lib/llvm-17/bin" >> "$GITHUB_PATH"
+          clang-17 --version | head -1
 
       - name: Configure (blu_spark defconfig)
         run: |
           make O=out ARCH=arm64 LLVM=1 blu_spark_defconfig
           grep -E "CONFIG_KSU=|CONFIG_KSU_SUSFS=" out/.config
-          grep -E "STACKPROTECTOR_PER_TASK|CC_HAVE_STACKPROTECTOR_SYSREG|STACKPROTECTOR=" out/.config
 
       - name: Build kernel image
         run: |
           make O=out ARCH=arm64 LLVM=1 -j"$(nproc)" Image
           ls -lh out/arch/arm64/boot/Image
-          grep TSK_STACK_CANARY out/include/generated/asm-offsets.h || echo "TSK_STACK_CANARY NOT FOUND"
 
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
           name: Image-${{ matrix.branch }}
           path: out/arch/arm64/boot/Image
-          if-no-files-found: ignore
-
-      - name: Upload .config on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: config-${{ matrix.branch }}
-          path: out/.config
           if-no-files-found: ignore
