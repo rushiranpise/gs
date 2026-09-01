@@ -5,7 +5,6 @@
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/workqueue.h>
-#include <linux/moduleparam.h>
 
 #include "policy/allowlist.h"
 #include "policy/app_profile.h"
@@ -14,17 +13,27 @@
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
 #include "hook/syscall_hook_manager.h"
+#include "hook/lsm_hook.h"
 #include "runtime/ksud.h"
 #include "runtime/ksud_boot.h"
-#include "feature/sulog.h"
 #include "supercall/supercall.h"
 #include "ksu.h"
 #include "infra/file_wrapper.h"
 #include "selinux/selinux.h"
 #include "hook/syscall_hook.h"
 #include "feature/adb_root.h"
+#include "feature/selinux_hide.h"
+#include "feature/sulog.h"
+#include "infra/symbol_resolver.h"
 
-#if defined(__x86_64__)
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs.h>
+#include "hook/setuid_hook.h"
+#include "feature/sucompat.h"
+extern void ksu_avc_spoof_late_init(void);
+#endif
+
+#if defined(__x86_64__) && !defined(CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER)
 #include <asm/cpufeature.h>
 #include <linux/version.h>
 #ifndef X86_FEATURE_INDIRECT_SAFE
@@ -38,11 +47,13 @@
 // Therefore, ksu lkm, which uses gki toolchain, requires this __stack_chk_guard,
 // while those third-party kernel can't provide.
 // Thus, we manually provide it instead of using kernel's
-#if defined(CONFIG_STACKPROTECTOR) &&                                                                                  \
-    (defined(CONFIG_ARM64) && defined(MODULE) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))
+#if defined(CONFIG_STACKPROTECTOR) &&                                          \
+    (defined(CONFIG_ARM64) && defined(MODULE) &&                               \
+     !defined(CONFIG_STACKPROTECTOR_PER_TASK))
 #include <linux/stackprotector.h>
 #include <linux/random.h>
-unsigned long __stack_chk_guard __ro_after_init __attribute__((visibility("hidden")));
+unsigned long __stack_chk_guard __ro_after_init
+    __attribute__((visibility("hidden")));
 
 __attribute__((no_stack_protector)) void __init ksu_setup_stack_chk_guard()
 {
@@ -77,9 +88,16 @@ bool allow_shell = false;
 #endif
 module_param(allow_shell, bool, 0);
 
+bool ksu_no_custom_rc = false;
+module_param_named(norc, ksu_no_custom_rc, bool, 0);
+
 int __init kernelsu_init(void)
 {
-#if defined(__x86_64__)
+#ifdef CONFIG_KSU_SUSFS
+	susfs_init();
+#endif // #ifdef KSU_SUSFS
+
+#if defined(__x86_64__) && !defined(CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER)
     // If the kernel has the hardening patch, X86_FEATURE_INDIRECT_SAFE must be set
     if (!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)) {
         pr_alert("*************************************************************");
@@ -96,113 +114,158 @@ int __init kernelsu_init(void)
 #endif
 
 #ifdef MODULE
-    ksu_late_loaded = (current->pid != 1);
+	ksu_late_loaded = (current->pid != 1);
 #else
-    ksu_late_loaded = false;
+	ksu_late_loaded = false;
 #endif
 
 #ifdef CONFIG_KSU_DEBUG
-    pr_alert("*************************************************************");
-    pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
-    pr_alert("**                                                         **");
-    pr_alert("**         You are running KernelSU in DEBUG mode          **");
-    pr_alert("**                                                         **");
-    pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
-    pr_alert("*************************************************************");
+	pr_alert("*************************************************************");
+	pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
+	pr_alert("**                                                         **");
+	pr_alert("**         You are running KernelSU in DEBUG mode          **");
+	pr_alert("**                                                         **");
+	pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
+	pr_alert("*************************************************************");
 #endif
-    if (allow_shell) {
-        pr_alert("shell is allowed at init!");
-    }
+	if (allow_shell) {
+		pr_alert("shell is allowed at init!");
+	}
 
-    ksu_cred = prepare_creds();
-    if (!ksu_cred) {
-        pr_err("prepare cred failed!\n");
-    }
+	ksu_cred = prepare_creds();
+	if (!ksu_cred) {
+		pr_err("prepare cred failed!\n");
+		return -ENOSYS;
+	}
 
-    ksu_syscall_hook_init();
+	ksu_init_symbol_resolver();
 
-    ksu_feature_init();
-    ksu_sulog_init();
-    ksu_adb_root_init();
+#if !defined(CONFIG_KSU_SUSFS) && defined(CONFIG_KPROBES)
+	ksu_syscall_hook_init();
+#endif
 
-    ksu_supercalls_init();
+	ksu_feature_init();
+	ksu_sulog_init();
+	ksu_adb_root_init();
 
-    if (ksu_late_loaded) {
-        pr_info("late load mode, skipping kprobe hooks\n");
+#ifndef CONFIG_KSU_SUSFS
+#ifdef CONFIG_KPROBES
+	ksu_lsm_hook_init();
+#endif
+#endif
 
-        apply_kernelsu_rules();
-        cache_sid();
-        setup_ksu_cred();
+	ksu_selinux_hide_init();
 
-        // Grant current process (ksud late-load) root
-        // with KSU SELinux domain before enforcing SELinux, so it
-        // can continue to access /data/app etc. after enforcement.
-        escape_to_root_for_init();
+	ksu_supercalls_init();
+	ksu_app_profile_init();
 
-        ksu_allowlist_init();
-        ksu_load_allow_list();
+#ifdef CONFIG_KSU_SUSFS
+	ksu_sucompat_init();
+	ksu_setuid_hook_init();
+	ksu_avc_spoof_init();
+#endif
 
-        ksu_syscall_hook_manager_init();
+	if (ksu_late_loaded) {
+		pr_info("late load mode, skipping kprobe hooks\n");
 
-        ksu_throne_tracker_init();
-        ksu_observer_init();
-        ksu_file_wrapper_init();
+		apply_kernelsu_rules();
+		cache_sid();
+		setup_ksu_cred();
 
-        ksu_boot_completed = true;
-        track_throne(false);
+		// Grant current process (ksud late-load) root
+		// with KSU SELinux domain before enforcing SELinux, so it
+		// can continue to access /data/app etc. after enforcement.
+		escape_to_root_for_init();
 
-        if (!getenforce()) {
-            pr_info("Permissive SELinux, enforcing\n");
-            setenforce(true);
-        }
+		ksu_allowlist_init();
+		ksu_load_allow_list();
 
-    } else {
-        ksu_syscall_hook_manager_init();
+#if !defined(CONFIG_KSU_SUSFS) && defined(CONFIG_KPROBES)
+		ksu_syscall_hook_manager_init();
+#endif
 
-        ksu_allowlist_init();
+		ksu_throne_tracker_init();
+		ksu_observer_init();
+		ksu_file_wrapper_init();
 
-        ksu_throne_tracker_init();
+		ksu_boot_completed = true;
+		track_throne(false);
 
-        ksu_ksud_init();
+		#ifdef CONFIG_KSU_SUSFS
+		ksu_avc_spoof_late_init();
+		#endif
+		ksu_selinux_hide_drop_backup_if_unused();
 
-        ksu_file_wrapper_init();
-    }
+		if (!getenforce()) {
+			pr_info("Permissive SELinux, enforcing\n");
+			setenforce(true);
+		}
+
+	} else {
+#if !defined(CONFIG_KSU_SUSFS) && defined(CONFIG_KPROBES)
+		ksu_syscall_hook_manager_init();
+#endif
+
+		ksu_allowlist_init();
+
+		ksu_throne_tracker_init();
+
+		ksu_ksud_init();
+
+		ksu_file_wrapper_init();
+	}
 
 #ifdef MODULE
 #ifndef CONFIG_KSU_DEBUG
-    kobject_del(&THIS_MODULE->mkobj.kobj);
+	kobject_del(&THIS_MODULE->mkobj.kobj);
 #endif
 #endif
-    return 0;
+	return 0;
 }
 
 void __exit kernelsu_exit(void)
 {
-    // Phase 1: Stop all hooks first to prevent new callbacks
-    ksu_syscall_hook_manager_exit();
+	// Phase 1: Stop all hooks first to prevent new callbacks
+#if !defined(CONFIG_KSU_SUSFS) && defined(CONFIG_KPROBES)
+	ksu_syscall_hook_manager_exit();
+#endif
 
-    ksu_supercalls_exit();
+	ksu_supercalls_exit();
 
-    if (!ksu_late_loaded)
-        ksu_ksud_exit();
+	if (!ksu_late_loaded)
+		ksu_ksud_exit();
 
-    // Wait for any in-flight RCU readers (e.g. handler traversing allow_list)
-    synchronize_rcu();
+	// Wait for any in-flight RCU readers (e.g. handler traversing allow_list)
+	synchronize_rcu();
 
-    // Phase 2: Now safe to release data structures
-    ksu_observer_exit();
+	// Phase 2: Now safe to release data structures
+	ksu_observer_exit();
 
-    ksu_throne_tracker_exit();
+	ksu_throne_tracker_exit();
 
-    ksu_allowlist_exit();
+	ksu_allowlist_exit();
 
-    ksu_adb_root_exit();
-    ksu_sulog_exit();
-    ksu_feature_exit();
+#ifdef CONFIG_KSU_SUSFS
+	ksu_avc_spoof_exit();
+	ksu_sucompat_exit();
+	ksu_setuid_hook_exit();
+#endif
 
-    if (ksu_cred) {
-        put_cred(ksu_cred);
-    }
+	ksu_selinux_hide_exit();
+
+#ifndef CONFIG_KSU_SUSFS
+#ifdef CONFIG_KPROBES
+	ksu_lsm_hook_exit();
+#endif
+#endif
+
+	ksu_adb_root_exit();
+
+	ksu_sulog_exit();
+
+	ksu_feature_exit();
+
+	put_cred(ksu_cred);
 }
 
 #if NEED_OWN_STACKPROTECTOR
@@ -217,6 +280,6 @@ MODULE_AUTHOR("weishu");
 MODULE_DESCRIPTION("Android KernelSU");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
-#else
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 #endif
