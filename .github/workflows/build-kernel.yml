@@ -63,6 +63,7 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           SHA="$(git rev-parse --short=7 HEAD)"
+          FULL_SHA="$(git rev-parse HEAD)"
           IMG="blu_spark_r269-gs-${VARIANT}_${SHA}.img"
           ZIP="blu_spark_r269-gs-${VARIANT}_${SHA}.zip"
           mv out/arch/arm64/boot/boot.img "$IMG"
@@ -71,7 +72,7 @@ jobs:
           sed "s/@SHA@/$SHA/; s|@DATE@|$(date +%F)|" "$CHANGELOG_TMPL" > changelog.txt
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           gh release create "$RELEASE_TAG" "$IMG" "$ZIP" "blu_spark_r269-${VARIANT}.sha1sum" changelog.txt \
-            --target "$SHA" \
+            --target "$FULL_SHA" \
             --title "blu_spark r269 (${VARIANT})" \
             --notes-file changelog.txt
       - name: Upload artifacts
